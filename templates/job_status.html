@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<body>
+<table>
+    <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th>URL</th>
+        <th>Variant</th>
+    </tr>
+    {{ range .}}
+        <tr>
+            <td>{{ .Name }}</td>
+            <td>{{ .Status }}</td>
+            <td><a href={{ .URL }}> {{ .URL }}</a></td>
+            <td>{{ .Variant }}</td>
+        </tr>
+    {{ end}}
+</table>
+</body>
+</html>

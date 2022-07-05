@@ -8,12 +8,14 @@ import (
 	"github.com/gocolly/colly"
 )
 
-type jobStatus struct {
-	url    string
-	status string
+type job struct {
+	URL     string
+	Status  string
+	Variant string
+	Name    string
 }
 
-type jobs map[string]jobStatus
+type jobs map[string]job
 
 func getJobURLs(jobURLs []string, jobName string) string {
 	trimmedJobName := strings.Split(jobName, "master-")[1]
@@ -25,7 +27,46 @@ func getJobURLs(jobURLs []string, jobName string) string {
 	return ""
 }
 
-func Parse(inputURL string) {
+// filterJobsBasedOnVariants filters the jobs in the required format as presented in spreadsheet
+func filterJobsBasedOnVariants(totalJobs jobs) jobs {
+	variants := make(map[string][]string)
+	platforms := []string{"aws", "azure", "gcp", "metal-ipi", "vsphere"}
+	for _, platform := range platforms {
+		variants[platform] = []string{
+			platform + "-upi-serial", platform + "-upi", // upi specific jobs
+			platform + "-serial",                              // serial
+			platform + "-csi",                                 // csi
+			platform + "-single-serial", platform + "-single", // single node
+			platform + "-techpreview-serial", platform + "-techpreview", // tech preview jobs
+			platform + "-ovn-serial", platform + "-ovn", // ovn specific jobs
+			platform + "-rt",                                                               //rt specific jobs
+			"console-" + platform,                                                          // console
+			platform + "-upgrade-ovn",                                                      // ovn upgrade jobs
+			platform + "-upgrade-single", platform + "-upgrade-cnv", platform + "-upgrade", // upgrade jobs
+			"-upgrade-from-stable-" + platform,
+			platform, // e2e-parallel
+		}
+	}
+	jobsCollected := make(jobs)
+	for _, platform := range platforms {
+		for _, probableJob := range variants[platform] {
+			for jobName, jobStatus := range totalJobs {
+				if strings.Contains(jobName, probableJob) {
+					if _, ok := jobsCollected[jobName]; ok {
+						continue
+					} else {
+						jobStatus.Name = jobName
+						jobStatus.Variant = probableJob
+						jobsCollected[jobName] = jobStatus
+					}
+				}
+			}
+		}
+	}
+	return jobsCollected
+}
+
+func Parse(inputURL string) []job {
 	c := colly.NewCollector()
 	c.SetRequestTimeout(120 * time.Second)
 	c.OnRequest(func(r *colly.Request) {
@@ -43,17 +84,17 @@ func Parse(inputURL string) {
 	// get all the failed jobs
 	c.OnHTML("span.text-danger", func(h *colly.HTMLElement) {
 		jobName := h.Text
-		js := jobStatus{}
-		js.status = "failed"
-		js.url = getJobURLs(jobUrls, jobName)
+		js := job{}
+		js.Status = "failed"
+		js.URL = getJobURLs(jobUrls, jobName)
 		jobs[h.Text] = js
 	})
 	// get all successful jobs
 	c.OnHTML("span.text-success", func(h *colly.HTMLElement) {
 		jobName := h.Text
-		js := jobStatus{}
-		js.status = "Success"
-		js.url = getJobURLs(jobUrls, jobName)
+		js := job{}
+		js.Status = "Success"
+		js.URL = getJobURLs(jobUrls, jobName)
 		jobs[h.Text] = js
 	})
 	c.OnResponse(func(r *colly.Response) {
@@ -64,7 +105,11 @@ func Parse(inputURL string) {
 		fmt.Println("Got this error:", e)
 	})
 	c.Visit(inputURL)
-	for jobName, jobStatus := range jobs {
-		fmt.Println(jobName, jobStatus)
+	finalJobs := filterJobsBasedOnVariants(jobs)
+	var jobCollection []job
+	for _, jobStatus := range finalJobs {
+		jobCollection = append(jobCollection, jobStatus)
 	}
+	return jobCollection
+	//fmt.Printf("variant: %v Jobs: %v Status: %v\n", jobStatus.variant, jobStatus.url, jobStatus.status)
 }
